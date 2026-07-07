@@ -18,7 +18,7 @@ from __future__ import annotations
 import math
 import re
 from dataclasses import dataclass, field
-from enum import Enum, auto
+from enum import Enum
 
 from .pdf_parser import ObjectType, ParsedPDF, PDFObject
 
@@ -34,6 +34,7 @@ class Severity(Enum):
 @dataclass
 class SecurityFinding:
     """A single security finding."""
+
     rule_id: str
     title: str
     description: str
@@ -57,6 +58,7 @@ class SecurityFinding:
 @dataclass
 class SecurityReport:
     """Complete security analysis report."""
+
     findings: list[SecurityFinding] = field(default_factory=list)
     risk_score: int = 0
     risk_level: str = "safe"
@@ -181,10 +183,9 @@ class SecurityAnalyzer:
             if b"/JS" in obj_dict:
                 js_val = _resolve(obj_dict[b"/JS"], self.objects)
                 js_text = ""
-                if js_val.type == ObjectType.STRING_LITERAL:
-                    js_text = js_val.value.decode("latin-1", errors="replace") if isinstance(js_val.value, bytes) else ""
-                elif js_val.type == ObjectType.NAME:
-                    js_text = js_val.value.decode("latin-1", errors="replace") if isinstance(js_val.value, bytes) else ""
+                if js_val.type == ObjectType.STRING_LITERAL or js_val.type == ObjectType.NAME:
+                    decoded = js_val.value.decode("latin-1", errors="replace")
+                    js_text = decoded if isinstance(js_val.value, bytes) else ""
                 elif js_val.type == ObjectType.STREAM and js_val.stream_data:
                     js_text = js_val.stream_data.decode("latin-1", errors="replace")
 
@@ -209,30 +210,35 @@ class SecurityAnalyzer:
                         suspicious.append("createObject()")
 
                     severity = Severity.CRITICAL if suspicious else Severity.HIGH
-                    self.report.add(SecurityFinding(
-                        rule_id="JS-001",
-                        title="JavaScript Embedded in PDF",
-                        description=f"Document contains JavaScript code" + (f" with suspicious functions: {', '.join(suspicious)}" if suspicious else ""),
-                        severity=severity,
-                        category="javascript",
-                        object_num=obj_num,
-                        details={"snippets": js_text[:500], "suspicious_functions": suspicious},
-                    ))
+                    self.report.add(
+                        SecurityFinding(
+                            rule_id="JS-001",
+                            title="JavaScript Embedded in PDF",
+                            description="Document contains JavaScript code"
+                            + (f" with suspicious functions: {', '.join(suspicious)}" if suspicious else ""),
+                            severity=severity,
+                            category="javascript",
+                            object_num=obj_num,
+                            details={"snippets": js_text[:500], "suspicious_functions": suspicious},
+                        )
+                    )
 
             # /AA (Additional Actions) dictionary
             if b"/AA" in obj_dict:
                 aa = _resolve(obj_dict[b"/AA"], self.objects)
                 if aa.type == ObjectType.DICTIONARY and isinstance(aa.value, dict):
-                    action_types = [k.decode("latin-1", errors="replace") for k in aa.value.keys()]
-                    self.report.add(SecurityFinding(
-                        rule_id="JS-002",
-                        title="Additional Actions Dictionary Found",
-                        description=f"Document contains Additional Actions with types: {', '.join(action_types)}",
-                        severity=Severity.MEDIUM,
-                        category="javascript",
-                        object_num=obj_num,
-                        details={"action_types": action_types},
-                    ))
+                    action_types = [k.decode("latin-1", errors="replace") for k in aa.value]
+                    self.report.add(
+                        SecurityFinding(
+                            rule_id="JS-002",
+                            title="Additional Actions Dictionary Found",
+                            description=f"Document contains Additional Actions with types: {', '.join(action_types)}",
+                            severity=Severity.MEDIUM,
+                            category="javascript",
+                            object_num=obj_num,
+                            details={"action_types": action_types},
+                        )
+                    )
 
     def _check_launch_actions(self):
         """Check for launch actions that execute external programs."""
@@ -242,25 +248,29 @@ class SecurityAnalyzer:
             obj_dict = obj.value if isinstance(obj.value, dict) else {}
             action = obj_dict.get(b"/S")
             if action and action.type == ObjectType.NAME and action.value == b"/Launch":
-                self.report.add(SecurityFinding(
-                    rule_id="LAUNCH-001",
-                    title="Launch Action Detected",
-                    description="Document contains a Launch action that can execute external programs",
-                    severity=Severity.CRITICAL,
-                    category="launch",
-                    object_num=obj_num,
-                ))
-            # Check /Win, /Mac, /Unix in launch dictionaries
-            for key in [b"/Win", b"/Mac", b"/Unix"]:
-                if key in obj_dict:
-                    self.report.add(SecurityFinding(
-                        rule_id="LAUNCH-002",
-                        title="Platform-Specific Launch Action",
-                        description=f"Document contains platform-specific launch target ({key.decode()})",
+                self.report.add(
+                    SecurityFinding(
+                        rule_id="LAUNCH-001",
+                        title="Launch Action Detected",
+                        description="Document contains a Launch action that can execute external programs",
                         severity=Severity.CRITICAL,
                         category="launch",
                         object_num=obj_num,
-                    ))
+                    )
+                )
+            # Check /Win, /Mac, /Unix in launch dictionaries
+            for key in [b"/Win", b"/Mac", b"/Unix"]:
+                if key in obj_dict:
+                    self.report.add(
+                        SecurityFinding(
+                            rule_id="LAUNCH-002",
+                            title="Platform-Specific Launch Action",
+                            description=f"Document contains platform-specific launch target ({key.decode()})",
+                            severity=Severity.CRITICAL,
+                            category="launch",
+                            object_num=obj_num,
+                        )
+                    )
 
     def _check_uri_actions(self):
         """Check for URI actions that load external resources."""
@@ -271,9 +281,7 @@ class SecurityAnalyzer:
             action = obj_dict.get(b"/S")
             if action and action.type == ObjectType.NAME and action.value == b"/URI":
                 uri = obj_dict.get(b"/URI", "")
-                if uri.type == ObjectType.STRING_LITERAL and isinstance(uri.value, bytes):
-                    uri_str = uri.value.decode("latin-1", errors="replace")
-                elif uri.type == ObjectType.NAME and isinstance(uri.value, bytes):
+                if uri.type in (ObjectType.STRING_LITERAL, ObjectType.NAME) and isinstance(uri.value, bytes):
                     uri_str = uri.value.decode("latin-1", errors="replace")
                 else:
                     uri_str = str(uri)
@@ -283,15 +291,17 @@ class SecurityAnalyzer:
                 if uri_str and not uri_str.startswith(("http://", "https://")):
                     severity = Severity.HIGH
 
-                self.report.add(SecurityFinding(
-                    rule_id="URI-001",
-                    title="URI Action Detected",
-                    description=f"Document references external URI: {uri_str[:200]}",
-                    severity=severity,
-                    category="uri",
-                    object_num=obj_num,
-                    details={"uri": uri_str[:500]},
-                ))
+                self.report.add(
+                    SecurityFinding(
+                        rule_id="URI-001",
+                        title="URI Action Detected",
+                        description=f"Document references external URI: {uri_str[:200]}",
+                        severity=severity,
+                        category="uri",
+                        object_num=obj_num,
+                        details={"uri": uri_str[:500]},
+                    )
+                )
 
     def _check_embedded_files(self):
         """Check for embedded files."""
@@ -301,27 +311,31 @@ class SecurityAnalyzer:
             obj_dict = obj.value if isinstance(obj.value, dict) else {}
             type_val = obj_dict.get(b"/Type")
             if type_val and type_val.type == ObjectType.NAME and type_val.value == b"/EmbeddedFile":
-                self.report.add(SecurityFinding(
-                    rule_id="EMBED-001",
-                    title="Embedded File Detected",
-                    description="Document contains an embedded file (EF entry)",
-                    severity=Severity.MEDIUM,
-                    category="embedded",
-                    object_num=obj_num,
-                ))
+                self.report.add(
+                    SecurityFinding(
+                        rule_id="EMBED-001",
+                        title="Embedded File Detected",
+                        description="Document contains an embedded file (EF entry)",
+                        severity=Severity.MEDIUM,
+                        category="embedded",
+                        object_num=obj_num,
+                    )
+                )
             # Check /EF references
             ef = obj_dict.get(b"/EF")
             if ef:
                 ef_resolved = _resolve(ef, self.objects)
                 if ef_resolved.type == ObjectType.DICTIONARY:
-                    self.report.add(SecurityFinding(
-                        rule_id="EMBED-002",
-                        title="File Reference in Object",
-                        description="Object contains /EF (embedded file) reference",
-                        severity=Severity.MEDIUM,
-                        category="embedded",
-                        object_num=obj_num,
-                    ))
+                    self.report.add(
+                        SecurityFinding(
+                            rule_id="EMBED-002",
+                            title="File Reference in Object",
+                            description="Object contains /EF (embedded file) reference",
+                            severity=Severity.MEDIUM,
+                            category="embedded",
+                            object_num=obj_num,
+                        )
+                    )
 
     def _check_openaction(self):
         """Check for automatic actions on document open."""
@@ -338,15 +352,17 @@ class SecurityAnalyzer:
                         action_type = _get_name_bytes(s).decode("latin-1", errors="replace")
 
                 severity = Severity.HIGH if action_type in ("/JavaScript", "/Launch") else Severity.MEDIUM
-                self.report.add(SecurityFinding(
-                    rule_id="ACTION-001",
-                    title="Automatic Action on Open",
-                    description=f"Document performs automatic action ({action_type}) when opened",
-                    severity=severity,
-                    category="action",
-                    object_num=obj_num,
-                    details={"action_type": action_type},
-                ))
+                self.report.add(
+                    SecurityFinding(
+                        rule_id="ACTION-001",
+                        title="Automatic Action on Open",
+                        description=f"Document performs automatic action ({action_type}) when opened",
+                        severity=severity,
+                        category="action",
+                        object_num=obj_num,
+                        details={"action_type": action_type},
+                    )
+                )
 
     def _check_acroform(self):
         """Check for AcroForm (interactive form) with potential injection."""
@@ -355,26 +371,30 @@ class SecurityAnalyzer:
                 continue
             obj_dict = obj.value if isinstance(obj.value, dict) else {}
             if b"/AcroForm" in obj_dict:
-                self.report.add(SecurityFinding(
-                    rule_id="FORM-001",
-                    title="Interactive Form Detected",
-                    description="Document contains an AcroForm with fillable fields",
-                    severity=Severity.LOW,
-                    category="form",
-                    object_num=obj_num,
-                ))
+                self.report.add(
+                    SecurityFinding(
+                        rule_id="FORM-001",
+                        title="Interactive Form Detected",
+                        description="Document contains an AcroForm with fillable fields",
+                        severity=Severity.LOW,
+                        category="form",
+                        object_num=obj_num,
+                    )
+                )
                 # Check for XFA (XML Forms Architecture) which can contain scripts
                 acroform = _resolve(obj_dict[b"/AcroForm"], self.objects)
                 if acroform.type == ObjectType.DICTIONARY and isinstance(acroform.value, dict):
                     if b"/XFA" in acroform.value:
-                        self.report.add(SecurityFinding(
-                            rule_id="FORM-002",
-                            title="XFA Form Detected",
-                            description="AcroForm contains XFA (XML Forms Architecture) which may execute scripts",
-                            severity=Severity.HIGH,
-                            category="form",
-                            object_num=obj_num,
-                        ))
+                        self.report.add(
+                            SecurityFinding(
+                                rule_id="FORM-002",
+                                title="XFA Form Detected",
+                                description="AcroForm contains XFA (XML Forms Architecture) which may execute scripts",
+                                severity=Severity.HIGH,
+                                category="form",
+                                object_num=obj_num,
+                            )
+                        )
 
     def _check_suspicious_streams(self):
         """Check for streams with suspicious content filters."""
@@ -390,38 +410,43 @@ class SecurityAnalyzer:
             filt = stream_dict.get(b"/Filter")
             if filt:
                 if filt.type == ObjectType.NAME and filt.value in suspicious_filters:
-                    self.report.add(SecurityFinding(
-                        rule_id="STREAM-001",
-                        title="JavaScript Stream Filter",
-                        description="Stream uses JavaScript filter for content",
-                        severity=Severity.CRITICAL,
-                        category="stream",
-                        object_num=obj_num,
-                    ))
+                    self.report.add(
+                        SecurityFinding(
+                            rule_id="STREAM-001",
+                            title="JavaScript Stream Filter",
+                            description="Stream uses JavaScript filter for content",
+                            severity=Severity.CRITICAL,
+                            category="stream",
+                            object_num=obj_num,
+                        )
+                    )
                 elif filt.type == ObjectType.ARRAY:
                     for f in filt.value:
                         if f.type == ObjectType.NAME and f.value in suspicious_filters:
-                            self.report.add(SecurityFinding(
-                                rule_id="STREAM-001",
-                                title="JavaScript Stream Filter",
-                                description="Stream uses JavaScript filter for content",
-                                severity=Severity.CRITICAL,
-                                category="stream",
-                                object_num=obj_num,
-                            ))
+                            self.report.add(
+                                SecurityFinding(
+                                    rule_id="STREAM-001",
+                                    title="JavaScript Stream Filter",
+                                    description="Stream uses JavaScript filter for content",
+                                    severity=Severity.CRITICAL,
+                                    category="stream",
+                                    object_num=obj_num,
+                                )
+                            )
 
             # Check /Subtype
             subtype = stream_dict.get(b"/Subtype")
-            if subtype and subtype.type == ObjectType.NAME:
-                if subtype.value == b"/JavaScript":
-                    self.report.add(SecurityFinding(
+            if subtype and subtype.type == ObjectType.NAME and subtype.value == b"/JavaScript":
+                self.report.add(
+                    SecurityFinding(
                         rule_id="STREAM-002",
                         title="JavaScript Stream Object",
                         description="Stream object has /Subtype /JavaScript",
                         severity=Severity.HIGH,
                         category="stream",
                         object_num=obj_num,
-                    ))
+                    )
+                )
 
     def _check_high_entropy_streams(self):
         """Detect high-entropy streams that may contain encrypted/obfuscated content."""
@@ -431,20 +456,22 @@ class SecurityAnalyzer:
             entropy = _entropy(obj.stream_data)
             # High entropy (>7.5) suggests encryption or heavy compression
             if entropy > 7.5 and len(obj.stream_data) > 100:
-                self.report.add(SecurityFinding(
-                    rule_id="ENTROPY-001",
-                    title="High-Entropy Stream Detected",
-                    description=f"Stream has entropy {entropy:.2f}/8.0 — may be encrypted or obfuscated",
-                    severity=Severity.LOW,
-                    category="obfuscation",
-                    object_num=obj_num,
-                    details={"entropy": round(entropy, 3), "size": len(obj.stream_data)},
-                ))
+                self.report.add(
+                    SecurityFinding(
+                        rule_id="ENTROPY-001",
+                        title="High-Entropy Stream Detected",
+                        description=f"Stream has entropy {entropy:.2f}/8.0 — may be encrypted or obfuscated",
+                        severity=Severity.LOW,
+                        category="obfuscation",
+                        object_num=obj_num,
+                        details={"entropy": round(entropy, 3), "size": len(obj.stream_data)},
+                    )
+                )
 
     def _check_obfuscated_names(self):
         """Detect obfuscated PDF name objects (hex-encoded, unusual characters)."""
         obfuscated_count = 0
-        for obj_num, obj in self.objects.items():
+        for _obj_num, obj in self.objects.items():
             if obj.type != ObjectType.DICTIONARY or not isinstance(obj.value, dict):
                 continue
             for key in obj.value:
@@ -457,27 +484,31 @@ class SecurityAnalyzer:
                         obfuscated_count += 1
 
         if obfuscated_count > 5:
-            self.report.add(SecurityFinding(
-                rule_id="OBFUSC-001",
-                title="Obfuscated Names Detected",
-                description=f"Found {obfuscated_count} potentially obfuscated name objects",
-                severity=Severity.MEDIUM,
-                category="obfuscation",
-                details={"count": obfuscated_count},
-            ))
+            self.report.add(
+                SecurityFinding(
+                    rule_id="OBFUSC-001",
+                    title="Obfuscated Names Detected",
+                    description=f"Found {obfuscated_count} potentially obfuscated name objects",
+                    severity=Severity.MEDIUM,
+                    category="obfuscation",
+                    details={"count": obfuscated_count},
+                )
+            )
 
     def _check_incremental_updates(self):
         """Check for suspicious incremental update patterns."""
         # Count the number of objects at each xref section
         if len(self.objects) > 1000 and self.pdf.xref.prev_xref is not None:
-            self.report.add(SecurityFinding(
-                rule_id="INCR-001",
-                title="Large Document with Xref History",
-                description="Large document with cross-reference history may indicate incremental update abuse",
-                severity=Severity.LOW,
-                category="structure",
-                details={"object_count": len(self.objects)},
-            ))
+            self.report.add(
+                SecurityFinding(
+                    rule_id="INCR-001",
+                    title="Large Document with Xref History",
+                    description="Large document with cross-reference history may indicate incremental update abuse",
+                    severity=Severity.LOW,
+                    category="structure",
+                    details={"object_count": len(self.objects)},
+                )
+            )
 
     def _check_cross_reference_streams(self):
         """Check for cross-reference stream objects."""
@@ -488,14 +519,16 @@ class SecurityAnalyzer:
                     # Check if it references compressed objects
                     w = obj.value.get(b"/W")
                     if w and w.type == ObjectType.ARRAY:
-                        self.report.add(SecurityFinding(
-                            rule_id="XREF-001",
-                            title="Cross-Reference Stream Object",
-                            description="Document uses cross-reference streams (PDF 1.5+)",
-                            severity=Severity.INFO,
-                            category="structure",
-                            object_num=obj_num,
-                        ))
+                        self.report.add(
+                            SecurityFinding(
+                                rule_id="XREF-001",
+                                title="Cross-Reference Stream Object",
+                                description="Document uses cross-reference streams (PDF 1.5+)",
+                                severity=Severity.INFO,
+                                category="structure",
+                                object_num=obj_num,
+                            )
+                        )
 
     def _check_large_streams(self):
         """Check for unusually large streams that may contain payloads."""
@@ -504,20 +537,22 @@ class SecurityAnalyzer:
                 continue
             # Flag streams > 10MB
             if len(obj.stream_data) > 10 * 1024 * 1024:
-                self.report.add(SecurityFinding(
-                    rule_id="SIZE-001",
-                    title="Very Large Stream Object",
-                    description=f"Stream is {len(obj.stream_data) / 1024 / 1024:.1f} MB — unusually large",
-                    severity=Severity.LOW,
-                    category="anomaly",
-                    object_num=obj_num,
-                    details={"size_bytes": len(obj.stream_data)},
-                ))
+                self.report.add(
+                    SecurityFinding(
+                        rule_id="SIZE-001",
+                        title="Very Large Stream Object",
+                        description=f"Stream is {len(obj.stream_data) / 1024 / 1024:.1f} MB — unusually large",
+                        severity=Severity.LOW,
+                        category="anomaly",
+                        object_num=obj_num,
+                        details={"size_bytes": len(obj.stream_data)},
+                    )
+                )
 
     def _check_nested_actions(self):
         """Check for deeply nested action chains."""
         max_depth = 0
-        for obj_num, obj in self.objects.items():
+        for _obj_num, obj in self.objects.items():
             if obj.type != ObjectType.DICTIONARY or not isinstance(obj.value, dict):
                 continue
             depth = self._measure_action_depth(obj, set())
@@ -525,14 +560,16 @@ class SecurityAnalyzer:
                 max_depth = depth
 
         if max_depth > 3:
-            self.report.add(SecurityFinding(
-                rule_id="NEST-001",
-                title="Deeply Nested Action Chain",
-                description=f"Document has action chains nested {max_depth} levels deep",
-                severity=Severity.MEDIUM,
-                category="action",
-                details={"max_depth": max_depth},
-            ))
+            self.report.add(
+                SecurityFinding(
+                    rule_id="NEST-001",
+                    title="Deeply Nested Action Chain",
+                    description=f"Document has action chains nested {max_depth} levels deep",
+                    severity=Severity.MEDIUM,
+                    category="action",
+                    details={"max_depth": max_depth},
+                )
+            )
 
     def _measure_action_depth(self, obj: PDFObject, visited: set, depth: int = 0) -> int:
         """Measure the maximum nesting depth of action chains."""
@@ -567,14 +604,16 @@ class SecurityAnalyzer:
                         # Widget annotations can have actions
                         aa = obj.value.get(b"/AA")
                         if aa:
-                            self.report.add(SecurityFinding(
-                                rule_id="ANNOT-001",
-                                title="Widget Annotation with Actions",
-                                description="Interactive form widget has additional actions",
-                                severity=Severity.LOW,
-                                category="annotation",
-                                object_num=obj_num,
-                            ))
+                            self.report.add(
+                                SecurityFinding(
+                                    rule_id="ANNOT-001",
+                                    title="Widget Annotation with Actions",
+                                    description="Interactive form widget has additional actions",
+                                    severity=Severity.LOW,
+                                    category="annotation",
+                                    object_num=obj_num,
+                                )
+                            )
 
     def _check_jbig2_images(self):
         """Check for JBIG2 image filters which have known vulnerabilities."""
@@ -594,14 +633,16 @@ class SecurityAnalyzer:
                     names = [f.value for f in filt.value if f.type == ObjectType.NAME]
 
                 if b"/JBIG2Decode" in names:
-                    self.report.add(SecurityFinding(
-                        rule_id="JBIG2-001",
-                        title="JBIG2 Image Filter Detected",
-                        description="JBIG2 filter has known vulnerabilities (CVE-2011-3026 and others)",
-                        severity=Severity.MEDIUM,
-                        category="image",
-                        object_num=obj_num,
-                    ))
+                    self.report.add(
+                        SecurityFinding(
+                            rule_id="JBIG2-001",
+                            title="JBIG2 Image Filter Detected",
+                            description="JBIG2 filter has known vulnerabilities (CVE-2011-3026 and others)",
+                            severity=Severity.MEDIUM,
+                            category="image",
+                            object_num=obj_num,
+                        )
+                    )
 
     def _check_embedded_javascript_strings(self):
         """Scan stream data for embedded JavaScript patterns."""
@@ -618,15 +659,18 @@ class SecurityAnalyzer:
                 continue
             for pattern in js_patterns:
                 if re.search(pattern, obj.stream_data):
-                    self.report.add(SecurityFinding(
-                        rule_id="JS-STR-001",
-                        title="JavaScript Pattern in Stream Data",
-                        description=f"Stream contains embedded JavaScript pattern: {pattern.decode('latin-1', errors='replace')}",
-                        severity=Severity.HIGH,
-                        category="javascript",
-                        object_num=obj_num,
-                        details={"pattern": pattern.decode("latin-1", errors="replace")},
-                    ))
+                    self.report.add(
+                        SecurityFinding(
+                            rule_id="JS-STR-001",
+                            title="JavaScript Pattern in Stream Data",
+                            description=f"Stream contains embedded JS pattern: "
+                            f"{pattern.decode('latin-1', errors='replace')}",
+                            severity=Severity.HIGH,
+                            category="javascript",
+                            object_num=obj_num,
+                            details={"pattern": pattern.decode("latin-1", errors="replace")},
+                        )
+                    )
                     break  # One finding per stream
 
 

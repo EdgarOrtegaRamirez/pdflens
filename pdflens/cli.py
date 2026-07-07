@@ -10,15 +10,14 @@ from pathlib import Path
 
 import click
 from rich.console import Console
-from rich.table import Table
 from rich.panel import Panel
-from rich.text import Text
+from rich.table import Table
 
-from .pdf_parser import parse_pdf_file, PDFParseError
 from .metadata import extract_metadata
-from .security import analyze_security, Severity
+from .pdf_parser import PDFParseError, parse_pdf_file
+from .report import generate_json_report, generate_markdown_report, generate_text_report
+from .security import Severity, analyze_security
 from .structure import analyze_structure
-from .report import generate_text_report, generate_json_report, generate_markdown_report
 
 console = Console()
 
@@ -39,7 +38,14 @@ def main():
 
 @main.command()
 @click.argument("pdf_file", type=click.Path(exists=True))
-@click.option("--format", "-f", "output_format", type=click.Choice(["text", "json", "markdown"]), default="text", help="Output format")
+@click.option(
+    "--format",
+    "-f",
+    "output_format",
+    type=click.Choice(["text", "json", "markdown"]),
+    default="text",
+    help="Output format",
+)
 @click.option("--output", "-o", type=click.Path(), default=None, help="Output file (default: stdout)")
 @click.option("--findings-only", is_flag=True, help="Show only security findings")
 def analyze(pdf_file: str, output_format: str, output: str | None, findings_only: bool):
@@ -160,12 +166,14 @@ def security(pdf_file: str, as_json: bool):
     risk_color = risk_colors.get(summary["risk_level"], "white")
     risk_label = risk_labels.get(summary["risk_level"], summary["risk_level"])
 
-    console.print(Panel(
-        f"[{risk_color}]{risk_label}[/]\n"
-        f"Risk Score: {summary['risk_score']} | Findings: {summary['total_findings']}",
-        title="Security Analysis",
-        border_style=risk_color,
-    ))
+    console.print(
+        Panel(
+            f"[{risk_color}]{risk_label}[/]\n"
+            f"Risk Score: {summary['risk_score']} | Findings: {summary['total_findings']}",
+            title="Security Analysis",
+            border_style=risk_color,
+        )
+    )
 
     if report.findings:
         severity_colors = {
@@ -177,9 +185,7 @@ def security(pdf_file: str, as_json: bool):
         }
         for i, finding in enumerate(report.findings, 1):
             color = severity_colors.get(finding.severity, "white")
-            console.print(
-                f"  [{color}]{i:3d}. [{finding.severity.value.upper():8s}][/] {finding.title}"
-            )
+            console.print(f"  [{color}]{i:3d}. [{finding.severity.value.upper():8s}][/] {finding.title}")
             console.print(f"       {finding.description}")
             if finding.object_num is not None:
                 console.print(f"       [dim]Object: {finding.object_num}[/]")
@@ -204,15 +210,17 @@ def structure(pdf_file: str, as_json: bool):
         click.echo(json.dumps(report.summary(), indent=2, ensure_ascii=False, default=str))
         return
 
-    console.print(Panel(
-        f"Objects: {report.total_object_count} | "
-        f"Streams: {report.total_stream_count} | "
-        f"Pages: {report.total_page_count}\n"
-        f"Fonts: {report.total_font_count} | "
-        f"Images: {report.total_image_count} | "
-        f"Annotations: {report.total_annotation_count}",
-        title="Document Structure",
-    ))
+    console.print(
+        Panel(
+            f"Objects: {report.total_object_count} | "
+            f"Streams: {report.total_stream_count} | "
+            f"Pages: {report.total_page_count}\n"
+            f"Fonts: {report.total_font_count} | "
+            f"Images: {report.total_image_count} | "
+            f"Annotations: {report.total_annotation_count}",
+            title="Document Structure",
+        )
+    )
 
     # Page sizes
     if report.page_sizes:
@@ -260,9 +268,11 @@ def check(pdf_file: str, limit: int):
     exit_code = risk_exit.get(summary["risk_level"], 0)
 
     if summary["risk_level"] == "safe":
-        console.print(f"[green]✓ SAFE[/green] — No security issues found")
+        console.print("[green]✓ SAFE[/green] — No security issues found")
     else:
-        console.print(f"[bold]{summary['risk_level'].upper()} RISK[/bold] — {summary['total_findings']} findings (score: {summary['risk_score']})")
+        findings = summary["total_findings"]
+        score = summary["risk_score"]
+        console.print(f"[bold]— {findings} findings (score: {score})")
         for finding in report.findings[:limit]:
             console.print(f"  [{finding.severity.value}] {finding.title}")
 

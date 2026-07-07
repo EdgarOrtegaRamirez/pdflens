@@ -5,26 +5,25 @@ Uses synthetic PDF bytes constructed for testing rather than external PDF files.
 """
 
 import json
-import math
-import struct
 import zlib
-from pathlib import Path
 
 import pytest
 
+from pdflens.metadata import _decode_pdf_string, _parse_pdf_date, extract_metadata
 from pdflens.pdf_parser import (
-    PDFParser, ParsedPDF, PDFObject, ObjectType,
-    XRefTable, XRefEntry, PDFParseError, parse_pdf,
+    ObjectType,
+    PDFObject,
+    PDFParseError,
+    parse_pdf,
 )
-from pdflens.metadata import extract_metadata, PDFMetadata, _decode_pdf_string, _parse_pdf_date
-from pdflens.security import analyze_security, SecurityReport, SecurityAnalyzer, Severity, _entropy
-from pdflens.structure import analyze_structure, StructureReport, STANDARD_FONTS
-from pdflens.report import generate_text_report, generate_json_report, generate_markdown_report
-
+from pdflens.report import generate_json_report, generate_markdown_report, generate_text_report
+from pdflens.security import SecurityAnalyzer, SecurityReport, Severity, _entropy, analyze_security
+from pdflens.structure import STANDARD_FONTS, analyze_structure
 
 # ============================================================
 # Synthetic PDF construction helpers
 # ============================================================
+
 
 def _build_simple_pdf(
     title: str = "",
@@ -72,19 +71,28 @@ def _build_simple_pdf(
     next_obj = 3 + page_count
     obj_num_5 = next_obj
     if include_js:
-        obj_pairs.append((obj_num_5, f"{obj_num_5} 0 obj\n<< /Type /EmbeddedFile /Length 44 >>\nstream\napp.alert('Hello');\nendstream\nendobj\n"))
+        js_obj = (
+            f"{obj_num_5} 0 obj\n<< /Type /EmbeddedFile /Length 44 >>\nstream\napp.alert('Hello');\nendstream\nendobj\n"
+        )
+        obj_pairs.append((obj_num_5, js_obj))
         next_obj += 1
     if include_launch:
-        obj_pairs.append((next_obj, f"{next_obj} 0 obj\n<< /S /Launch /Win << /F (cmd.exe) /P (/c calc.exe) >> >>\nendobj\n"))
+        launch_obj = f"{next_obj} 0 obj\n<< /S /Launch /Win << /F (cmd.exe) /P (/c calc.exe) >> >>\nendobj\n"
+        obj_pairs.append((next_obj, launch_obj))
         next_obj += 1
     if include_uri:
-        obj_pairs.append((next_obj, f"{next_obj} 0 obj\n<< /S /URI /URI (http://evil.example.com/payload) >>\nendobj\n"))
+        uri_obj = f"{next_obj} 0 obj\n<< /S /URI /URI (http://evil.example.com/payload) >>\nendobj\n"
+        obj_pairs.append((next_obj, uri_obj))
         next_obj += 1
     if include_embedded:
-        obj_pairs.append((next_obj, f"{next_obj} 0 obj\n<< /Type /EmbeddedFile /Length 5 >>\nstream\nmalware\nendstream\nendobj\n"))
+        embedded_obj = f"{next_obj} 0 obj\n<< /Type /EmbeddedFile /Length 5 >>\nstream\nmalware\nendstream\nendobj\n"
+        obj_pairs.append((next_obj, embedded_obj))
         next_obj += 1
     if include_openaction and not include_js:
-        obj_pairs.append((next_obj, f"{next_obj} 0 obj\n<< /Type /EmbeddedFile /Length 44 >>\nstream\napp.alert('Hello');\nendstream\nendobj\n"))
+        openaction_obj = (
+            f"{next_obj} 0 obj\n<< /Type /EmbeddedFile /Length 44 >>\nstream\napp.alert('Hello');\nendstream\nendobj\n"
+        )
+        obj_pairs.append((next_obj, openaction_obj))
         next_obj += 1
 
     # Object 10: Simple font
@@ -127,10 +135,7 @@ def _build_simple_pdf(
             xref += b"0000000000 00000 f \n"
 
     # Trailer
-    trailer = (
-        f"trailer\n<< /Size {max_obj + 1} /Root 1 0 R >>\n"
-        f"startxref\n{xref_offset}\n%%EOF\n"
-    ).encode()
+    trailer = (f"trailer\n<< /Size {max_obj + 1} /Root 1 0 R >>\nstartxref\n{xref_offset}\n%%EOF\n").encode()
 
     return header + body + xref + trailer
 
@@ -154,7 +159,6 @@ def _build_pdf_with_xref_stream() -> bytes:
     # Object 4: XRef stream
     obj4_offset = obj3_offset + len(obj3)
     # Create a simple xref stream
-    w = [1, 3, 1]  # field widths
     # Build entries: type 0 (free) for obj 0, type 1 (uncompressed) for objects 1-3
     entries = bytearray()
     # Object 0: free
@@ -188,6 +192,7 @@ def _build_pdf_with_xref_stream() -> bytes:
 # ============================================================
 # Parser Tests
 # ============================================================
+
 
 class TestPDFParser:
     """Tests for the PDF parser."""
@@ -271,6 +276,7 @@ class TestPDFObject:
 # Metadata Tests
 # ============================================================
 
+
 class TestMetadata:
     """Tests for metadata extraction."""
 
@@ -352,6 +358,7 @@ class TestParsePDFDate:
 # Security Tests
 # ============================================================
 
+
 class TestSecurity:
     """Tests for security analysis."""
 
@@ -420,9 +427,9 @@ class TestSecurity:
 
     def test_finding_score(self):
         from pdflens.security import SecurityFinding
+
         finding = SecurityFinding(
-            rule_id="TEST", title="Test", description="Test",
-            severity=Severity.CRITICAL, category="test"
+            rule_id="TEST", title="Test", description="Test", severity=Severity.CRITICAL, category="test"
         )
         assert finding.score == 10
 
@@ -430,7 +437,7 @@ class TestSecurity:
         """High entropy streams should be flagged."""
         # Create a PDF with a high-entropy stream
         random_data = bytes(range(256)) * 100
-        compressed = zlib.compress(random_data)
+        zlib.compress(random_data)
         # High entropy after compression
         data = _build_simple_pdf()
         pdf = parse_pdf(data)
@@ -461,6 +468,7 @@ class TestEntropy:
 # ============================================================
 # Structure Tests
 # ============================================================
+
 
 class TestStructure:
     """Tests for structure analysis."""
@@ -524,6 +532,7 @@ class TestStructure:
 # Report Generation Tests
 # ============================================================
 
+
 class TestReports:
     """Tests for report generation."""
 
@@ -576,12 +585,15 @@ class TestReports:
 # CLI Tests
 # ============================================================
 
+
 class TestCLI:
     """Tests for the CLI interface."""
 
     def test_cli_version(self):
         from click.testing import CliRunner
+
         from pdflens.cli import main
+
         runner = CliRunner()
         result = runner.invoke(main, ["--version"])
         assert result.exit_code == 0
@@ -589,7 +601,9 @@ class TestCLI:
 
     def test_cli_help(self):
         from click.testing import CliRunner
+
         from pdflens.cli import main
+
         runner = CliRunner()
         result = runner.invoke(main, ["--help"])
         assert result.exit_code == 0
@@ -597,7 +611,9 @@ class TestCLI:
 
     def test_cli_analyze(self, tmp_path):
         from click.testing import CliRunner
+
         from pdflens.cli import main
+
         pdf_path = tmp_path / "test.pdf"
         pdf_path.write_bytes(_build_simple_pdf())
         runner = CliRunner()
@@ -607,7 +623,9 @@ class TestCLI:
 
     def test_cli_analyze_json(self, tmp_path):
         from click.testing import CliRunner
+
         from pdflens.cli import main
+
         pdf_path = tmp_path / "test.pdf"
         pdf_path.write_bytes(_build_simple_pdf())
         runner = CliRunner()
@@ -618,7 +636,9 @@ class TestCLI:
 
     def test_cli_analyze_markdown(self, tmp_path):
         from click.testing import CliRunner
+
         from pdflens.cli import main
+
         pdf_path = tmp_path / "test.pdf"
         pdf_path.write_bytes(_build_simple_pdf())
         runner = CliRunner()
@@ -628,7 +648,9 @@ class TestCLI:
 
     def test_cli_meta(self, tmp_path):
         from click.testing import CliRunner
+
         from pdflens.cli import main
+
         pdf_path = tmp_path / "test.pdf"
         pdf_path.write_bytes(_build_simple_pdf())
         runner = CliRunner()
@@ -638,7 +660,9 @@ class TestCLI:
 
     def test_cli_security(self, tmp_path):
         from click.testing import CliRunner
+
         from pdflens.cli import main
+
         pdf_path = tmp_path / "test.pdf"
         pdf_path.write_bytes(_build_simple_pdf())
         runner = CliRunner()
@@ -648,7 +672,9 @@ class TestCLI:
 
     def test_cli_security_json(self, tmp_path):
         from click.testing import CliRunner
+
         from pdflens.cli import main
+
         pdf_path = tmp_path / "test.pdf"
         pdf_path.write_bytes(_build_simple_pdf())
         runner = CliRunner()
@@ -659,7 +685,9 @@ class TestCLI:
 
     def test_cli_check_safe(self, tmp_path):
         from click.testing import CliRunner
+
         from pdflens.cli import main
+
         pdf_path = tmp_path / "test.pdf"
         pdf_path.write_bytes(_build_simple_pdf())
         runner = CliRunner()
@@ -668,7 +696,9 @@ class TestCLI:
 
     def test_cli_check_launch(self, tmp_path):
         from click.testing import CliRunner
+
         from pdflens.cli import main
+
         pdf_path = tmp_path / "test.pdf"
         pdf_path.write_bytes(_build_simple_pdf(include_launch=True))
         runner = CliRunner()
@@ -677,7 +707,9 @@ class TestCLI:
 
     def test_cli_structure(self, tmp_path):
         from click.testing import CliRunner
+
         from pdflens.cli import main
+
         pdf_path = tmp_path / "test.pdf"
         pdf_path.write_bytes(_build_simple_pdf())
         runner = CliRunner()
@@ -687,7 +719,9 @@ class TestCLI:
 
     def test_cli_structure_json(self, tmp_path):
         from click.testing import CliRunner
+
         from pdflens.cli import main
+
         pdf_path = tmp_path / "test.pdf"
         pdf_path.write_bytes(_build_simple_pdf())
         runner = CliRunner()
@@ -698,14 +732,18 @@ class TestCLI:
 
     def test_cli_analyze_nonexistent(self):
         from click.testing import CliRunner
+
         from pdflens.cli import main
+
         runner = CliRunner()
         result = runner.invoke(main, ["analyze", "nonexistent.pdf"])
         assert result.exit_code != 0
 
     def test_cli_analyze_output_file(self, tmp_path):
         from click.testing import CliRunner
+
         from pdflens.cli import main
+
         pdf_path = tmp_path / "test.pdf"
         pdf_path.write_bytes(_build_simple_pdf())
         out_path = tmp_path / "report.txt"
@@ -720,6 +758,7 @@ class TestCLI:
 # ============================================================
 # Edge Cases
 # ============================================================
+
 
 class TestEdgeCases:
     """Tests for edge cases and error handling."""

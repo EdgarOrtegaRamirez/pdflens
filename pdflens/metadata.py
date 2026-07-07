@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from datetime import datetime
 
 from .pdf_parser import ObjectType, ParsedPDF, PDFObject
 
@@ -15,6 +14,7 @@ from .pdf_parser import ObjectType, ParsedPDF, PDFObject
 @dataclass
 class PDFMetadata:
     """Comprehensive metadata extracted from a PDF."""
+
     # Document info
     title: str = ""
     author: str = ""
@@ -124,12 +124,11 @@ def extract_metadata(pdf: ParsedPDF) -> PDFMetadata:
 
     # Check for xref streams (PDF 1.5+)
     for obj in pdf.objects.values():
-        if obj.type == ObjectType.DICTIONARY and isinstance(obj.value, dict):
-            if b"/Type" in obj.value:
-                type_val = obj.value[b"/Type"]
-                if type_val.type == ObjectType.NAME and type_val.value == b"/XRef":
-                    meta.has_xref_streams = True
-                    break
+        if obj.type == ObjectType.DICTIONARY and isinstance(obj.value, dict) and b"/Type" in obj.value:
+            type_val = obj.value[b"/Type"]
+            if type_val.type == ObjectType.NAME and type_val.value == b"/XRef":
+                meta.has_xref_streams = True
+                break
 
     # Get info dictionary
     if info_ref is not None:

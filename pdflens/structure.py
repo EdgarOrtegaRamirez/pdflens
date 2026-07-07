@@ -6,7 +6,6 @@ including page tree, fonts, images, annotations, and resource usage.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any
 
 from .pdf_parser import ObjectType, ParsedPDF, PDFObject
 
@@ -14,6 +13,7 @@ from .pdf_parser import ObjectType, ParsedPDF, PDFObject
 @dataclass
 class FontInfo:
     """Information about a font in the PDF."""
+
     name: str = ""
     base_font: str = ""
     font_type: str = ""  # Type0, Type1, TrueType, CIDFontType0, CIDFontType2
@@ -26,6 +26,7 @@ class FontInfo:
 @dataclass
 class ImageInfo:
     """Information about an image in the PDF."""
+
     width: int = 0
     height: int = 0
     bits_per_component: int = 0
@@ -38,6 +39,7 @@ class ImageInfo:
 @dataclass
 class PageInfo:
     """Information about a page."""
+
     page_num: int = 0
     width: float = 0
     height: float = 0
@@ -53,6 +55,7 @@ class PageInfo:
 @dataclass
 class StructureReport:
     """Complete structure analysis report."""
+
     pages: list[PageInfo] = field(default_factory=list)
     fonts: list[FontInfo] = field(default_factory=list)
     images: list[ImageInfo] = field(default_factory=list)
@@ -113,13 +116,32 @@ def _get_name(val: PDFObject | None) -> str:
 
 
 STANDARD_FONTS = {
-    "Courier", "Courier-Bold", "Courier-Oblique", "Courier-BoldOblique",
-    "Helvetica", "Helvetica-Bold", "Helvetica-Oblique", "Helvetica-BoldOblique",
-    "Times-Roman", "Times-Bold", "Times-Italic", "Times-BoldItalic",
-    "Symbol", "ZapfDingbats",
-    "CourierNew", "CourierNew,Bold", "CourierNew,Italic", "CourierNew,BoldItalic",
-    "Arial", "Arial,Bold", "Arial,Italic", "Arial,BoldItalic",
-    "TimesNewRoman", "TimesNewRoman,Bold", "TimesNewRoman,Italic", "TimesNewRoman,BoldItalic",
+    "Courier",
+    "Courier-Bold",
+    "Courier-Oblique",
+    "Courier-BoldOblique",
+    "Helvetica",
+    "Helvetica-Bold",
+    "Helvetica-Oblique",
+    "Helvetica-BoldOblique",
+    "Times-Roman",
+    "Times-Bold",
+    "Times-Italic",
+    "Times-BoldItalic",
+    "Symbol",
+    "ZapfDingbats",
+    "CourierNew",
+    "CourierNew,Bold",
+    "CourierNew,Italic",
+    "CourierNew,BoldItalic",
+    "Arial",
+    "Arial,Bold",
+    "Arial,Italic",
+    "Arial,BoldItalic",
+    "TimesNewRoman",
+    "TimesNewRoman,Bold",
+    "TimesNewRoman,Italic",
+    "TimesNewRoman,BoldItalic",
 }
 
 
@@ -203,8 +225,7 @@ def _analyze_page_tree(node: PDFObject, objects: dict, report: StructureReport, 
         report.max_depth = depth
 
     type_val = node_dict.get(b"/Type")
-    is_page = (type_val and type_val.type == ObjectType.NAME and type_val.value == b"/Page")
-    is_pages = (type_val and type_val.type == ObjectType.NAME and type_val.value == b"/Pages")
+    is_page = type_val and type_val.type == ObjectType.NAME and type_val.value == b"/Page"
 
     if is_page:
         page = _extract_page_info(node_dict, objects, len(report.pages) + 1)
@@ -291,7 +312,7 @@ def _collect_fonts(objects: dict, report: StructureReport):
     for obj_num, obj in objects.items():
         if obj.type != ObjectType.DICTIONARY or not isinstance(obj.value, dict):
             continue
-        type_val = obj.value.get(b"/Type")
+        obj.value.get(b"/Type")
         subtype = obj.value.get(b"/Subtype")
         if not subtype or subtype.type != ObjectType.NAME:
             continue

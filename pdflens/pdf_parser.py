@@ -7,8 +7,8 @@ Implements a hand-written recursive descent parser for the PDF object format.
 
 from __future__ import annotations
 
+import contextlib
 import re
-import struct
 import zlib
 from dataclasses import dataclass, field
 from enum import Enum, auto
@@ -32,6 +32,7 @@ class ObjectType(Enum):
 @dataclass
 class PDFObject:
     """Represents a parsed PDF object."""
+
     type: ObjectType
     value: Any = None
     obj_num: int | None = None
@@ -61,6 +62,7 @@ class PDFObject:
 @dataclass
 class XRefEntry:
     """A single cross-reference entry."""
+
     obj_num: int
     gen_num: int
     offset: int  # byte offset of object in file
@@ -71,6 +73,7 @@ class XRefEntry:
 @dataclass
 class XRefTable:
     """Complete cross-reference table."""
+
     entries: dict[int, XRefEntry] = field(default_factory=dict)
     startxref: int = 0
     prev_xref: int | None = None
@@ -85,6 +88,7 @@ class XRefTable:
 @dataclass
 class ParsedPDF:
     """Result of parsing a PDF file."""
+
     header_version: str = ""
     trailer: dict = field(default_factory=dict)
     xref: XRefTable = field(default_factory=XRefTable)
@@ -164,7 +168,7 @@ class PDFParser:
         if idx == -1:
             raise PDFParseError("No startxref found")
         # Find the offset after 'startxref'
-        after = self.data[idx + 9:]
+        after = self.data[idx + 9 :]
         # Skip whitespace
         after = after.lstrip(b"\n\r ")
         # Read the number
@@ -233,11 +237,11 @@ class PDFParser:
                 v = stream_dict.get(key)
                 if v is None:
                     return default
-                return v.value if hasattr(v, 'value') else v
+                return v.value if hasattr(v, "value") else v
 
             # The xref stream contains /W array describing field widths
             w_obj = _get_val(b"/W", [])
-            size = _get_val(b"/Size", 0)
+            _get_val(b"/Size", 0)
             root = _get_val(b"/Root")
             info = _get_val(b"/Info")
             prev = _get_val(b"/Prev")
@@ -252,11 +256,11 @@ class PDFParser:
             if isinstance(w_obj, list):
                 w = []
                 for item in w_obj:
-                    w.append(item.value if hasattr(item, 'value') else item)
+                    w.append(item.value if hasattr(item, "value") else item)
             elif isinstance(w_obj, PDFObject) and w_obj.type == ObjectType.ARRAY:
                 w = []
                 for item in w_obj.value:
-                    w.append(item.value if hasattr(item, 'value') else item)
+                    w.append(item.value if hasattr(item, "value") else item)
             else:
                 w = []
 
@@ -265,33 +269,27 @@ class PDFParser:
                 w0, w1, w2 = [int(x) for x in w]
                 decoded = obj.stream_data
                 # Try FlateDecode
-                try:
+                with contextlib.suppress(Exception):
                     decoded = zlib.decompress(decoded)
-                except Exception:
-                    pass
                 # Parse entries
                 entry_size = w0 + w1 + w2
                 if entry_size > 0:
                     num_entries = len(decoded) // entry_size
                     obj_num = 0
                     for i in range(num_entries):
-                        chunk = decoded[i * entry_size: (i + 1) * entry_size]
+                        chunk = decoded[i * entry_size : (i + 1) * entry_size]
                         f0 = int.from_bytes(chunk[:w0], "big") if w0 > 0 else 0
-                        f1 = int.from_bytes(chunk[w0:w0 + w1], "big") if w1 > 0 else 0
-                        f2 = int.from_bytes(chunk[w0 + w1:], "big") if w2 > 0 else 0
+                        f1 = int.from_bytes(chunk[w0 : w0 + w1], "big") if w1 > 0 else 0
+                        f2 = int.from_bytes(chunk[w0 + w1 :], "big") if w2 > 0 else 0
 
                         if f0 == 0:  # type 0: free
                             self.xref.entries[obj_num] = XRefEntry(
                                 obj_num=obj_num, gen_num=f2, offset=0, free=True, in_use=False
                             )
                         elif f0 == 1:  # type 1: uncompressed
-                            self.xref.entries[obj_num] = XRefEntry(
-                                obj_num=obj_num, gen_num=f2, offset=f1, in_use=True
-                            )
+                            self.xref.entries[obj_num] = XRefEntry(obj_num=obj_num, gen_num=f2, offset=f1, in_use=True)
                         elif f0 == 2:  # type 2: compressed in stream
-                            self.xref.entries[obj_num] = XRefEntry(
-                                obj_num=obj_num, gen_num=0, offset=f1, in_use=True
-                            )
+                            self.xref.entries[obj_num] = XRefEntry(obj_num=obj_num, gen_num=0, offset=f1, in_use=True)
                         obj_num += 1
 
     def _parse_trailer(self):
@@ -356,18 +354,18 @@ class PDFParser:
             self._skip_token()
             self._skip_whitespace()
             # Consume 'stream' keyword line ending
-            if self.data[self.pos:self.pos + 1] == b"\r":
+            if self.data[self.pos : self.pos + 1] == b"\r":
                 self.pos += 1
-            if self.data[self.pos:self.pos + 1] == b"\n":
+            if self.data[self.pos : self.pos + 1] == b"\n":
                 self.pos += 1
-            elif self.data[self.pos:self.pos + 2] == b"\r\n":
+            elif self.data[self.pos : self.pos + 2] == b"\r\n":
                 self.pos += 2
 
             # Find 'endstream'
             end_idx = self.data.find(b"endstream", self.pos)
             if end_idx == -1:
                 end_idx = self.length
-            stream_data = self.data[self.pos:end_idx]
+            stream_data = self.data[self.pos : end_idx]
             self.pos = end_idx + 9  # len("endstream")
 
             # Try to get stream length from dictionary
@@ -395,9 +393,9 @@ class PDFParser:
         if self.pos >= self.length:
             return None
 
-        ch = self.data[self.pos:self.pos + 1]
+        ch = self.data[self.pos : self.pos + 1]
 
-        if ch == b"<" and self.data[self.pos + 1:self.pos + 2] == b"<":
+        if ch == b"<" and self.data[self.pos + 1 : self.pos + 2] == b"<":
             return self._parse_dictionary()
         elif ch == b"<":
             return self._parse_hex_string()
@@ -421,23 +419,22 @@ class PDFParser:
         return None
 
     def _parse_boolean(self) -> PDFObject:
-        if self.data[self.pos:self.pos + 4] == b"true":
+        if self.data[self.pos : self.pos + 4] == b"true":
             self.pos += 4
             return PDFObject(type=ObjectType.BOOLEAN, value=True)
-        elif self.data[self.pos:self.pos + 5] == b"false":
+        elif self.data[self.pos : self.pos + 5] == b"false":
             self.pos += 5
             return PDFObject(type=ObjectType.BOOLEAN, value=False)
         raise PDFParseError("Invalid boolean")
 
     def _parse_null(self) -> PDFObject:
-        if self.data[self.pos:self.pos + 4] == b"null":
+        if self.data[self.pos : self.pos + 4] == b"null":
             self.pos += 4
             return PDFObject(type=ObjectType.NULL, value=None)
         raise PDFParseError("Invalid null")
 
     def _parse_number_or_ref(self) -> PDFObject:
         """Parse a number or an indirect reference (N M R)."""
-        start = self.pos
         # Read first number
         num_str = self._read_number_string()
         if num_str is None:
@@ -472,10 +469,10 @@ class PDFParser:
         result = []
         depth = 1
         while self.pos < self.length and depth > 0:
-            ch = self.data[self.pos:self.pos + 1]
+            ch = self.data[self.pos : self.pos + 1]
             if ch == b"\\":
                 self.pos += 1
-                esc = self.data[self.pos:self.pos + 1]
+                esc = self.data[self.pos : self.pos + 1]
                 if esc == b"n":
                     result.append(b"\n")
                 elif esc == b"r":
@@ -493,7 +490,7 @@ class PDFParser:
                     octal = esc
                     for _ in range(2):
                         self.pos += 1
-                        next_ch = self.data[self.pos:self.pos + 1]
+                        next_ch = self.data[self.pos : self.pos + 1]
                         if next_ch in b"01234567":
                             octal += next_ch
                         else:
@@ -524,7 +521,7 @@ class PDFParser:
         self.pos += 1  # skip <
         hex_chars = []
         while self.pos < self.length:
-            ch = self.data[self.pos:self.pos + 1]
+            ch = self.data[self.pos : self.pos + 1]
             if ch == b">":
                 self.pos += 1
                 break
@@ -543,18 +540,18 @@ class PDFParser:
         start = self.pos
         # Keep the / prefix in the value for consistent key lookups
         while self.pos < self.length:
-            ch = self.data[self.pos:self.pos + 1]
+            ch = self.data[self.pos : self.pos + 1]
             if ch in b" \t\n\r()<>[ ]{}=/":
                 break
             self.pos += 1
-        name = self.data[start:self.pos]
+        name = self.data[start : self.pos]
         # Decode hex escapes like #20
         decoded = bytearray()
         i = 0
         while i < len(name):
-            if name[i:i + 1] == b"#" and i + 2 < len(name):
+            if name[i : i + 1] == b"#" and i + 2 < len(name):
                 try:
-                    decoded.append(int(name[i + 1:i + 3], 16))
+                    decoded.append(int(name[i + 1 : i + 3], 16))
                     i += 3
                 except ValueError:
                     decoded.append(name[i])
@@ -570,7 +567,7 @@ class PDFParser:
         elements = []
         self._skip_whitespace()
         while self.pos < self.length:
-            ch = self.data[self.pos:self.pos + 1]
+            ch = self.data[self.pos : self.pos + 1]
             if ch == b"]":
                 self.pos += 1
                 break
@@ -588,7 +585,7 @@ class PDFParser:
         self._skip_whitespace()
         while self.pos < self.length:
             self._skip_whitespace()
-            if self.data[self.pos:self.pos + 2] == b">>":
+            if self.data[self.pos : self.pos + 2] == b">>":
                 self.pos += 2
                 break
             # Parse key (must be a name)
@@ -607,13 +604,13 @@ class PDFParser:
 
     def _skip_whitespace(self):
         while self.pos < self.length:
-            ch = self.data[self.pos:self.pos + 1]
+            ch = self.data[self.pos : self.pos + 1]
             if ch in b" \t\n\r\x00":
                 self.pos += 1
             elif ch == b"%":
                 # Skip comment
                 self.pos += 1
-                while self.pos < self.length and self.data[self.pos:self.pos + 1] not in b"\n\r":
+                while self.pos < self.length and self.data[self.pos : self.pos + 1] not in b"\n\r":
                     self.pos += 1
             else:
                 break
@@ -625,11 +622,11 @@ class PDFParser:
             return None
         start = self.pos
         while self.pos < self.length:
-            ch = self.data[self.pos:self.pos + 1]
+            ch = self.data[self.pos : self.pos + 1]
             if ch in b" \t\n\r()<>[]{}/%":
                 break
             self.pos += 1
-        token = self.data[start:self.pos]
+        token = self.data[start : self.pos]
         return token if token else None
 
     def _peek_token(self) -> bytes | None:
@@ -647,11 +644,11 @@ class PDFParser:
         """Read until end of line."""
         start = self.pos
         while self.pos < self.length:
-            ch = self.data[self.pos:self.pos + 1]
+            ch = self.data[self.pos : self.pos + 1]
             if ch in b"\n\r":
-                line = self.data[start:self.pos]
+                line = self.data[start : self.pos]
                 # Skip line ending
-                if self.data[self.pos:self.pos + 2] == b"\r\n":
+                if self.data[self.pos : self.pos + 2] == b"\r\n":
                     self.pos += 2
                 else:
                     self.pos += 1
@@ -663,17 +660,17 @@ class PDFParser:
         """Read a number as a string."""
         self._skip_whitespace()
         start = self.pos
-        if self.pos < self.length and self.data[self.pos:self.pos + 1] in b"-+":
+        if self.pos < self.length and self.data[self.pos : self.pos + 1] in b"-+":
             self.pos += 1
-        while self.pos < self.length and self.data[self.pos:self.pos + 1] in b"0123456789.":
+        while self.pos < self.length and self.data[self.pos : self.pos + 1] in b"0123456789.":
             self.pos += 1
-        if self.pos < self.length and self.data[self.pos:self.pos + 1] in b"eE":
+        if self.pos < self.length and self.data[self.pos : self.pos + 1] in b"eE":
             self.pos += 1
-            if self.pos < self.length and self.data[self.pos:self.pos + 1] in b"-+":
+            if self.pos < self.length and self.data[self.pos : self.pos + 1] in b"-+":
                 self.pos += 1
-            while self.pos < self.length and self.data[self.pos:self.pos + 1] in b"0123456789":
+            while self.pos < self.length and self.data[self.pos : self.pos + 1] in b"0123456789":
                 self.pos += 1
-        num_str = self.data[start:self.pos].decode("ascii", errors="ignore")
+        num_str = self.data[start : self.pos].decode("ascii", errors="ignore")
         return num_str if num_str else None
 
 
