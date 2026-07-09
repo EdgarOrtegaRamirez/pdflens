@@ -23,8 +23,8 @@ classifiers = [
     "Topic :: Security",
 ]
 dependencies = [
-    "click>=8.1,<9",
-    "rich>=13.0,<14",
+    "click>=8.1",
+    "rich>=13.0",
     "pydantic>=2.0,<3",
 ]
 
